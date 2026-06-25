@@ -1,0 +1,120 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    function entryIsPublic() {
+      return resource.data.visibility == 'public';
+    }
+
+    function incomingEntryIsValid() {
+      let d = request.resource.data;
+      return d.userId == request.auth.uid
+        && d.visibility in ['public', 'private']
+        && d.lyricHighlight is string
+        && d.lyricHighlight.size() >= 1
+        && d.lyricHighlight.size() <= 500
+        && d.emotionalMeaning is string
+        && d.emotionalMeaning.size() >= 1
+        && d.emotionalMeaning.size() <= 1000
+        && (d.rating == null || (d.rating is int && d.rating >= 1 && d.rating <= 10));
+    }
+
+    function entryOwnerCannotMutateCounters() {
+      return !request.resource.data.diff(resource.data)
+        .affectedKeys()
+        .hasAny(['likesCount', 'commentsCount', 'createdAt', 'userId']);
+    }
+
+    function parentEntryIsPublic(entryId) {
+      return get(/databases/$(database)/documents/entries/$(entryId))
+        .data.visibility == 'public';
+    }
+
+    function parentPlaylistOwner(playlistId) {
+      return get(/databases/$(database)/documents/playlists/$(playlistId))
+        .data.userId;
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+
+    match /users/{userId} {
+      allow read: if isAuth();
+
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == userId;
+
+      allow update: if isOwner(userId)
+        && request.resource.data.topFourSongs.size() <= 4
+        && !request.resource.data.diff(resource.data)
+            .affectedKeys()
+            .hasAny(['uid', 'createdAt', 'entriesCount', 'followersCount', 'followingCount']);
+
+      allow delete: if false;
+    }
+
+    // ── Entries ───────────────────────────────────────────────────────────────
+
+    match /entries/{entryId} {
+      allow read: if isAuth() && (entryIsPublic() || isOwner(resource.data.userId));
+      allow create: if isAuth() && incomingEntryIsValid();
+      allow update: if isOwner(resource.data.userId) && entryOwnerCannotMutateCounters();
+      allow delete: if isOwner(resource.data.userId);
+
+      match /likes/{likeUserId} {
+        allow read:   if isAuth();
+        allow create: if isOwner(likeUserId) && parentEntryIsPublic(entryId);
+        allow delete: if isOwner(likeUserId);
+        allow update: if false;
+      }
+
+      match /comments/{commentId} {
+        allow read:   if isAuth();
+        allow create: if isAuth()
+          && request.resource.data.userId == request.auth.uid
+          && parentEntryIsPublic(entryId)
+          && request.resource.data.text.size() >= 1
+          && request.resource.data.text.size() <= 500;
+        allow delete: if isOwner(resource.data.userId);
+        allow update: if false;
+      }
+    }
+
+    // ── Playlists ─────────────────────────────────────────────────────────────
+
+    match /playlists/{playlistId} {
+      allow read: if isAuth()
+        && (resource.data.visibility == 'public' || isOwner(resource.data.userId));
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update: if isOwner(resource.data.userId)
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if isOwner(resource.data.userId);
+
+      match /songs/{songId} {
+        allow read: if isAuth()
+          && (get(/databases/$(database)/documents/playlists/$(playlistId)).data.visibility == 'public'
+              || isOwner(parentPlaylistOwner(playlistId)));
+        allow write: if isAuth() && isOwner(parentPlaylistOwner(playlistId));
+      }
+    }
+
+    // ── Follows ───────────────────────────────────────────────────────────────
+
+    match /follows/{followId} {
+      allow read:   if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.followerId == request.auth.uid
+        && followId == request.resource.data.followerId + '_' + request.resource.data.followedId
+        && request.resource.data.followedId != request.auth.uid;
+      allow delete: if isOwner(resource.data.followerId);
+      allow update: if false;
+    }
+  }
+}

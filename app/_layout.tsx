@@ -1,56 +1,38 @@
-import { useFonts } from 'expo-font';
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
-import 'react-native-reanimated';
+import { useEffect } from 'react'
+import { Stack, useSegments, useRouter } from 'expo-router'
+import * as SplashScreen from 'expo-splash-screen'
+import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 
-import { useColorScheme } from '@/components/useColorScheme';
+SplashScreen.preventAutoHideAsync()
 
-export {
-  // Catch any errors thrown by the Layout component.
-  ErrorBoundary,
-} from 'expo-router';
-
-export const unstable_settings = {
-  // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: '(tabs)',
-};
-
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
-
-export default function RootLayout() {
-  const [loaded, error] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-  });
-
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
-  useEffect(() => {
-    if (error) throw error;
-  }, [error]);
+function AuthGuard() {
+  const { isAuthenticated, loading } = useAuth()
+  const segments = useSegments()
+  const router   = useRouter()
 
   useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [loaded]);
+    if (loading) return
+    SplashScreen.hideAsync()
 
-  if (!loaded) {
-    return null;
-  }
+    const inAuth = segments[0] === '(auth)'
+    if (!isAuthenticated && !inAuth) router.replace('/(auth)/login')
+    else if (isAuthenticated && inAuth) router.replace('/(tabs)/')
+  }, [isAuthenticated, loading])
 
-  return <RootLayoutNav />;
+  return null
 }
 
-function RootLayoutNav() {
-  const colorScheme = useColorScheme();
-
+export default function RootLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+    <AuthProvider>
+      <AuthGuard />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0D0D0D' } }}>
+        <Stack.Screen name="(auth)"    options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)"    options={{ headerShown: false }} />
+        <Stack.Screen name="entry/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="user/[id]"  options={{ headerShown: false }} />
+        <Stack.Screen name="playlist/[id]" options={{ headerShown: false }} />
       </Stack>
-    </ThemeProvider>
-  );
+    </AuthProvider>
+  )
 }
