@@ -1,9 +1,12 @@
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native'
+import { useState } from 'react'
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Alert, StyleSheet } from 'react-native'
 import { Image } from 'expo-image'
 import { Ionicons } from '@expo/vector-icons'
+import * as ImagePicker from 'expo-image-picker'
 import { router } from 'expo-router'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUserEntries } from '@/hooks/useUserEntries'
+import { uploadAvatar } from '@/services/firebase/storageUpload'
 import { EntryCard } from '@/components/entry/EntryCard'
 import { Colors } from '@/constants/colors'
 
@@ -23,6 +26,61 @@ function Stat({ label, value, icon }: StatProps) {
 export default function ProfileScreen() {
   const { authUser, profile, loading } = useAuth()
   const { entries } = useUserEntries(authUser?.uid ?? '', 'public')
+  const [uploading, setUploading] = useState(false)
+
+  async function pickFromLibrary() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow access to your photo library to change your profile picture.')
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    })
+    if (!result.canceled && result.assets[0]) {
+      await doUpload(result.assets[0].uri)
+    }
+  }
+
+  async function takePhoto() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync()
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow camera access to take a profile picture.')
+      return
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    })
+    if (!result.canceled && result.assets[0]) {
+      await doUpload(result.assets[0].uri)
+    }
+  }
+
+  async function doUpload(uri: string) {
+    if (!authUser) return
+    setUploading(true)
+    try {
+      await uploadAvatar(authUser.uid, uri)
+    } catch (e: any) {
+      console.error('Avatar upload error:', e?.code, e?.message, e)
+      Alert.alert('Upload failed', e?.message ?? 'Could not update your profile picture. Please try again.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function handleAvatarPress() {
+    Alert.alert('Profile Photo', 'Choose an option', [
+      { text: 'Take Photo',            onPress: takePhoto },
+      { text: 'Choose from Library',   onPress: pickFromLibrary },
+      { text: 'Cancel', style: 'cancel' },
+    ])
+  }
 
   if (loading) {
     return (
@@ -52,12 +110,22 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.header}>
-        <View style={styles.avatarWrap}>
-          <Image source={{ uri: profile.avatarUrl }} style={styles.avatar} />
-          <TouchableOpacity style={styles.editAvatarBtn} onPress={() => router.push('/settings')}>
-            <Ionicons name="camera-outline" size={14} color="#fff" />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity style={styles.avatarWrap} onPress={handleAvatarPress} activeOpacity={0.8}>
+          <Image
+            source={profile.avatarUrl ? { uri: profile.avatarUrl } : require('@/assets/images/icon.png')}
+            style={styles.avatar}
+          />
+          {uploading ? (
+            <View style={styles.avatarOverlay}>
+              <ActivityIndicator color="#fff" size="small" />
+            </View>
+          ) : (
+            <View style={styles.editAvatarBtn}>
+              <Ionicons name="camera-outline" size={14} color="#fff" />
+            </View>
+          )}
+        </TouchableOpacity>
+
         <Text style={styles.displayName}>{profile.displayName}</Text>
         <Text style={styles.username}>@{profile.username}</Text>
         {!!profile.bio && <Text style={styles.bio}>{profile.bio}</Text>}
@@ -127,8 +195,9 @@ const styles = StyleSheet.create({
   topBar:         { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 16, paddingTop: 60, paddingBottom: 8 },
   iconBtn:        { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.surface, justifyContent: 'center', alignItems: 'center' },
   header:         { alignItems: 'center', paddingBottom: 24, paddingHorizontal: 16 },
-  avatarWrap:     { position: 'relative' },
+  avatarWrap:     { position: 'relative', width: 88, height: 88 },
   avatar:         { width: 88, height: 88, borderRadius: 44, backgroundColor: Colors.surfaceAlt },
+  avatarOverlay:  { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 44, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   editAvatarBtn:  { position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: 13, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: Colors.background },
   displayName:    { color: Colors.text, fontSize: 22, fontWeight: '700', marginTop: 12 },
   username:       { color: Colors.textSecondary, fontSize: 14, marginTop: 2 },
