@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Alert, StyleSheet,
+  KeyboardAvoidingView, Platform, ActivityIndicator, StyleSheet,
 } from 'react-native'
+import { AppModal } from '@/components/ui/AppModal'
 import { Image } from 'expo-image'
 import { Ionicons } from '@expo/vector-icons'
 import { useLocalSearchParams, router } from 'expo-router'
@@ -28,7 +29,8 @@ export default function EntryDetailScreen() {
   const [likeCount,   setLikeCount]   = useState(0)
   const [commentText, setCommentText] = useState('')
   const [posting,     setPosting]     = useState(false)
-  const [loading,     setLoading]     = useState(true)
+  const [loading,       setLoading]       = useState(true)
+  const [deleteVisible, setDeleteVisible] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -68,18 +70,15 @@ export default function EntryDetailScreen() {
     }
   }
 
-  async function handleDelete() {
+  function handleDelete() {
     if (!entry || !authUser) return
-    Alert.alert('Delete entry', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          await deleteEntry(entry.id, authUser.uid)
-          router.back()
-        },
-      },
-    ])
+    setDeleteVisible(true)
+  }
+
+  async function confirmDelete() {
+    if (!entry || !authUser) return
+    await deleteEntry(entry.id, authUser.uid)
+    router.back()
   }
 
   const isOwner = authUser?.uid === entry?.userId
@@ -216,6 +215,16 @@ export default function EntryDetailScreen() {
           </TouchableOpacity>
         </View>
       )}
+      <AppModal
+        visible={deleteVisible}
+        onClose={() => setDeleteVisible(false)}
+        title="Delete entry"
+        message="This cannot be undone."
+        buttons={[
+          { label: 'Cancel', style: 'cancel' },
+          { label: 'Delete', style: 'destructive', onPress: confirmDelete },
+        ]}
+      />
     </KeyboardAvoidingView>
   )
 }

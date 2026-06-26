@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Alert, StyleSheet } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native'
+import { AppModal } from '@/components/ui/AppModal'
+import { ImageEditor } from '@/components/ui/ImageEditor'
 import { Image } from 'expo-image'
 import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
@@ -26,60 +28,60 @@ function Stat({ label, value, icon }: StatProps) {
 export default function ProfileScreen() {
   const { authUser, profile, loading } = useAuth()
   const { entries } = useUserEntries(authUser?.uid ?? '', 'public')
-  const [uploading, setUploading] = useState(false)
+  const [uploading,       setUploading]       = useState(false)
+  const [localAvatarUri,  setLocalAvatarUri]  = useState<string | null>(null)
+  const [editorUri,       setEditorUri]       = useState<string | null>(null)
+  const [photoSheet,      setPhotoSheet]      = useState(false)
+  const [alertModal,      setAlertModal]      = useState({ visible: false, title: '', message: '' })
+
+  function showAlert(title: string, message: string) {
+    setAlertModal({ visible: true, title, message })
+  }
 
   async function pickFromLibrary() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow access to your photo library to change your profile picture.')
+      showAlert('Permission needed', 'Allow access to your photo library to change your profile picture.')
       return
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
+      quality: 0.9,
     })
     if (!result.canceled && result.assets[0]) {
-      await doUpload(result.assets[0].uri)
+      setEditorUri(result.assets[0].uri)
     }
   }
 
   async function takePhoto() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync()
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow camera access to take a profile picture.')
+      showAlert('Permission needed', 'Allow camera access to take a profile picture.')
       return
     }
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    })
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.9 })
     if (!result.canceled && result.assets[0]) {
-      await doUpload(result.assets[0].uri)
+      setEditorUri(result.assets[0].uri)
     }
   }
 
   async function doUpload(uri: string) {
     if (!authUser) return
+    setLocalAvatarUri(uri)
     setUploading(true)
     try {
       await uploadAvatar(authUser.uid, uri)
     } catch (e: any) {
       console.error('Avatar upload error:', e?.code, e?.message, e)
-      Alert.alert('Upload failed', e?.message ?? 'Could not update your profile picture. Please try again.')
+      setLocalAvatarUri(null)
+      showAlert('Upload failed', e?.message ?? 'Could not update your profile picture. Please try again.')
     } finally {
       setUploading(false)
     }
   }
 
   function handleAvatarPress() {
-    Alert.alert('Profile Photo', 'Choose an option', [
-      { text: 'Take Photo',            onPress: takePhoto },
-      { text: 'Choose from Library',   onPress: pickFromLibrary },
-      { text: 'Cancel', style: 'cancel' },
-    ])
+    setPhotoSheet(true)
   }
 
   if (loading) {
@@ -101,10 +103,21 @@ export default function ProfileScreen() {
   }
 
   return (
+    <>
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
 
+      {uploading && (
+        <View style={styles.uploadBanner}>
+          <ActivityIndicator color={Colors.primary} size="small" />
+          <Text style={styles.uploadBannerText}>Uploading photo… don't navigate away</Text>
+        </View>
+      )}
+
       <View style={styles.topBar}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/settings')}>
+        <TouchableOpacity
+          style={[styles.iconBtn, uploading && styles.btnDisabled]}
+          onPress={() => { if (!uploading) router.push('/settings') }}
+        >
           <Ionicons name="settings-outline" size={20} color={Colors.textSecondary} />
         </TouchableOpacity>
       </View>
@@ -112,8 +125,15 @@ export default function ProfileScreen() {
       <View style={styles.header}>
         <TouchableOpacity style={styles.avatarWrap} onPress={handleAvatarPress} activeOpacity={0.8}>
           <Image
-            source={profile.avatarUrl ? { uri: profile.avatarUrl } : require('@/assets/images/icon.png')}
+            source={
+              localAvatarUri
+                ? { uri: localAvatarUri }
+                : profile.avatarUrl
+                  ? { uri: profile.avatarUrl }
+                  : require('@/assets/images/icon.png')
+            }
             style={styles.avatar}
+            cachePolicy="none"
           />
           {uploading ? (
             <View style={styles.avatarOverlay}>
@@ -138,7 +158,10 @@ export default function ProfileScreen() {
           <Stat label="Following" value={profile.followingCount} icon="person-add-outline" />
         </View>
 
-        <TouchableOpacity style={styles.editBtn} onPress={() => router.push('/settings')}>
+        <TouchableOpacity
+          style={[styles.editBtn, uploading && styles.btnDisabled]}
+          onPress={() => { if (!uploading) router.push('/settings') }}
+        >
           <Ionicons name="create-outline" size={15} color={Colors.text} />
           <Text style={styles.editBtnText}>Edit profile</Text>
         </TouchableOpacity>
@@ -184,10 +207,43 @@ export default function ProfileScreen() {
       </View>
 
     </ScrollView>
+
+      {editorUri && (
+        <ImageEditor
+          visible
+          uri={editorUri}
+          onDone={(edited) => { setEditorUri(null); doUpload(edited) }}
+          onCancel={() => setEditorUri(null)}
+        />
+      )}
+
+      <AppModal
+        visible={photoSheet}
+        onClose={() => setPhotoSheet(false)}
+        title="Profile Photo"
+        variant="sheet"
+        buttons={[
+          { label: 'Take Photo',          onPress: takePhoto },
+          { label: 'Choose from Library', onPress: pickFromLibrary },
+          { label: 'Cancel', style: 'cancel' },
+        ]}
+      />
+
+      <AppModal
+        visible={alertModal.visible}
+        onClose={() => setAlertModal(a => ({ ...a, visible: false }))}
+        title={alertModal.title}
+        message={alertModal.message}
+        buttons={[{ label: 'OK' }]}
+      />
+    </>
   )
 }
 
 const styles = StyleSheet.create({
+  uploadBanner:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: Colors.surface, paddingVertical: 10, paddingTop: 54 },
+  uploadBannerText: { color: Colors.textSecondary, fontSize: 13 },
+  btnDisabled:      { opacity: 0.4 },
   loadingCenter:  { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background, gap: 10 },
   loadingText:    { color: Colors.textMuted, fontSize: 14 },
   container:      { flex: 1, backgroundColor: Colors.background },
