@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { onAuthStateChanged } from 'firebase/auth'
-import { doc, onSnapshot } from 'firebase/firestore'
+import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from '@/services/firebase/config'
 import type { AuthUser, User } from '@/types'
 
@@ -36,10 +36,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         photoURL:    firebaseUser.photoURL,
       })
 
-      return onSnapshot(doc(db, 'users', firebaseUser.uid), (snap) => {
-        setProfile(snap.exists() ? (snap.data() as User) : null)
-        setLoading(false)
-      })
+      return onSnapshot(
+        doc(db, 'users', firebaseUser.uid),
+        async (snap) => {
+          if (snap.exists()) {
+            setProfile(snap.data() as User)
+          } else {
+            const username = firebaseUser.email?.split('@')[0] ?? `user_${firebaseUser.uid.slice(0, 6)}`
+            const fallback: Omit<User, 'createdAt'> & { createdAt: unknown } = {
+              uid:            firebaseUser.uid,
+              username,
+              displayName:    firebaseUser.displayName ?? username,
+              bio:            '',
+              avatarUrl:      firebaseUser.photoURL ?? '',
+              topFourSongs:   [],
+              entriesCount:   0,
+              followersCount: 0,
+              followingCount: 0,
+              createdAt:      serverTimestamp(),
+            }
+            await setDoc(doc(db, 'users', firebaseUser.uid), fallback)
+          }
+          setLoading(false)
+        },
+        () => setLoading(false),
+      )
     })
   }, [])
 
